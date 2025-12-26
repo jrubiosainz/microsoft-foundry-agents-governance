@@ -1,0 +1,132 @@
+/* --- Design Tokens (Fluent / Acrylic / Dark) --- */
+:root {
+    /* Backgrounds */
+    --bg-app: #0f1117;
+    --bg-surface: rgba(30, 34, 45, 0.6);
+    --bg-card: rgba(255, 255, 255, 0.04);
+    --bg-card-hover: rgba(255, 255, 255, 0.08);
+    --bg-input: rgba(0, 0, 0, 0.2);
+    
+    /* Accents */
+    --accent-primary: #0078d4;
+    --accent-secondary: #60cdff;
+    --accent-purple: #8a2be2;
+    
+    /* Borders & Shadows */
+    --border-glass: 1px solid rgba(255, 255, 255, 0.08);
+    --shadow-card: 0 4px 24px -1px rgba(0, 0, 0, 0.2);
+    --shadow-glow: 0 0 15px rgba(96, 205, 255, 0.15);
+    
+    /* Typography */
+    --font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif;
+}
+
+/* Base Styles */
+body {
+    background-color: var(--bg-app);
+    color: #f3f4f6; /* Gray-100 equivalent */
+    font-family: var(--font-family);
+}
+
+/* Acrylic / Glass Utilities */
+.glass-panel {
+    background: var(--bg-surface);
+    backdrop-filter: blur(20px) saturate(125%);
+    border-right: var(--border-glass); /* Default for sidebar */
+}
+
+.glass-header {
+    background: rgba(15, 17, 23, 0.7);
+    backdrop-filter: blur(10px);
+    border-bottom: var(--border-glass);
+}
+
+.glass-card {
+    background: var(--bg-card);
+    border: var(--border-glass);
+    backdrop-filter: blur(10px);
+    transition: all 0.2s ease;
+}
+
+.glass-card:hover {
+    background: var(--bg-card-hover);
+    box-shadow: var(--shadow-glow);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.badge-glass {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+/* Navigation Items */
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    width: 100%;
+    border-radius: 6px;
+    color: #9ca3af; /* Gray-400 */
+    transition: all 0.15s ease;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.nav-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+}
+
+.nav-item.active {
+    background: rgba(0, 120, 212, 0.15); /* Azure tint */
+    color: #60cdff;
+    border-left: 3px solid #60cdff;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.4s ease-out forwards;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #e5e7eb;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #d1d5db;
+}
+
+/* Cytoscape Container */
+#cy {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Smooth transitions */
+.transition-all {
+    transition-property: all;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+}

@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azure AI Foundry Agents Governance</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="bg-[var(--bg-app)] font-['Segoe_UI'] text-gray-100 h-screen flex overflow-hidden selection:bg-blue-500/30">
+
+    <!-- 1. Left Rail (Sidebar) -->
+    <aside class="w-64 flex-shrink-0 glass-panel flex flex-col z-30">
+        <!-- Logo / Brand -->
+        <div class="h-16 flex items-center px-6 border-b border-white/5">
+            <img src="/static/images/foundry_logo.png" alt="Foundry Logo" class="w-8 h-8 mr-3 object-contain">
+            <span class="font-semibold text-sm tracking-wide text-white">AI Governance</span>
+        </div>
+
+        <!-- Nav Links -->
+        <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
+            <button class="nav-item active" data-target="section-overview" onclick="navigateTo('section-overview')">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+                Overview
+            </button>
+            <button class="nav-item" data-target="section-graph" onclick="navigateTo('section-graph')">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                Agents Explorer
+            </button>
+        </nav>
+    </aside>
+
+    <!-- 2. Main Content Wrapper -->
+    <div class="flex-1 flex flex-col min-w-0 relative">
+        
+        <!-- Top Command Bar -->
+        <header class="h-16 glass-header flex items-center justify-between px-6 z-20 flex-shrink-0">
+            <!-- Breadcrumbs / Context -->
+            <div class="flex items-center text-sm text-gray-400">
+                <div class="relative group">
+                    <div class="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                    </div>
+                    <select id="subscription-select" class="appearance-none bg-white/5 hover:bg-white/10 border border-white/10 rounded pl-8 pr-8 py-1.5 text-white font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer transition-colors min-w-[200px]">
+                        <option value="" class="bg-gray-800 text-white">All Subscriptions</option>
+                    </select>
+                    <div class="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none">
+                        <svg class="h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                </div>
+                
+                <!-- Loading Indicator -->
+                <div id="global-loading-indicator" class="flex items-center gap-3 ml-6 opacity-0 transition-opacity duration-300">
+                    <div class="w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span id="loading-text" class="text-sm font-medium text-white animate-pulse">Loading information...</span>
+                </div>
+            </div>
+
+            <!-- Search & Actions -->
+            <div class="flex items-center gap-4">
+                <!-- Search -->
+                <div class="relative">
+                    <input type="text" class="bg-black/20 border border-white/10 rounded-md px-3 py-1.5 pl-9 text-sm text-white focus:outline-none focus:border-blue-500/50 w-64 transition-all placeholder-gray-500" placeholder="Search resources (Ctrl+K)">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-500 absolute left-3 top-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                </div>
+                <!-- Refresh -->
+                <button class="p-2 hover:bg-white/5 rounded-md text-gray-400 hover:text-white transition-colors" onclick="window.location.reload()">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Canvas (Scrollable) -->
+        <main class="flex-1 overflow-y-auto p-8 relative scroll-smooth" id="main-canvas">
+            
+            <!-- SECTION: OVERVIEW -->
+            <section id="section-overview" class="space-y-8 animate-fade-in">
+                <!-- Header -->
+                <div class="flex justify-between items-end">
+                    <div>
+                        <h1 class="text-2xl font-semibold mb-1 text-white">Executive Overview</h1>
+                        <p class="text-gray-400 text-sm">Governance posture and operational health across your AI estate.</p>
+                    </div>
+                </div>
+
+                <!-- KPI Row -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- KPI Cards -->
+                    <div class="glass-card p-5 rounded-xl">
+                        <div class="text-gray-400 text-xs uppercase tracking-wider font-semibold mb-2">Total Agents</div>
+                        <div class="text-3xl font-bold text-white mb-1" id="kpi-total-agents">--</div>
+                        <div class="text-xs text-green-400 flex items-center gap-1 mt-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                            <span>Live Count</span>
+                        </div>
+                    </div>
+                    <div class="glass-card p-5 rounded-xl">
+                        <div class="text-gray-400 text-xs uppercase tracking-wider font-semibold mb-2">Active Models</div>
+                        <div class="text-3xl font-bold text-white mb-1" id="kpi-active-models">--</div>
+                        <div class="text-xs text-gray-500 mt-2">Across all projects</div>
+                    </div>
+                    <div class="glass-card p-5 rounded-xl">
+                        <div class="text-gray-400 text-xs uppercase tracking-wider font-semibold mb-2">Total Projects</div>
+                        <div class="text-3xl font-bold text-white mb-1" id="kpi-total-projects">--</div>
+                        <div class="text-xs text-gray-500 mt-2">Foundry Projects</div>
+                    </div>
+                </div>
+
+                <!-- Charts Row -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="glass-card rounded-xl p-6 flex flex-col">
+                        <h3 class="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">Model Distribution</h3>
+                        <div class="flex-1 relative h-48">
+                            <canvas id="chart-models"></canvas>
+                        </div>
+                    </div>
+                    <div class="glass-card rounded-xl p-6 flex flex-col">
+                        <h3 class="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">Project Utilization</h3>
+                        <div class="flex-1 relative h-48">
+                            <canvas id="chart-projects"></canvas>
+                        </div>
+                    </div>
+                    <div class="glass-card rounded-xl p-6 flex flex-col">
+                        <h3 class="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">Tool Types</h3>
+                        <div class="flex-1 relative h-48">
+                            <canvas id="chart-tools"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION: INVENTORY (Replaces old Resource Explorer) -->
+            <section id="section-inventory" class="hidden space-y-6 animate-fade-in">
+                <!-- Content Container (Where JS injects hubs/projects) -->
+                <div id="subscriptions-container" class="grid grid-cols-1 gap-6">
+                    <!-- JS will populate this -->
+                    <div class="flex justify-center py-12">
+                        <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION: GRAPH EXPLORER (Replaces old Graph View) -->
+            <section id="section-graph" class="hidden h-full flex flex-col animate-fade-in">
+                <!-- Toolbar -->
+                <div class="flex flex-col gap-4 mb-6">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h1 class="text-2xl font-semibold text-white">Agents Explorer</h1>
+                            <p class="text-gray-400 text-sm">Visualize dependencies and relationships.</p>
+                        </div>
+                        <div class="flex gap-4 items-center">
+                            <!-- View Toggle -->
+                            <div class="bg-black/20 p-1 rounded-lg flex text-sm border border-white/5">
+                                <button id="view-toggle-graph" class="px-4 py-1.5 rounded-md bg-white/10 text-white shadow-sm font-medium transition-all" onclick="toggleGraphView('graph')">Graph</button>
+                                <button id="view-toggle-table" class="px-4 py-1.5 rounded-md text-gray-400 hover:text-white transition-all" onclick="toggleGraphView('table')">Table</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Filters Bar -->
+                    <div class="glass-card p-3 rounded-xl flex flex-wrap gap-3 items-center">
+                        <div class="text-xs font-semibold text-gray-400 uppercase mr-2 flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>
+                            Filters:
+                        </div>
+                        <div class="relative">
+                            <input id="filter-project" placeholder="Project Name..." class="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 pl-8 text-xs text-white w-40 focus:outline-none focus:border-blue-500/50 transition-all">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-gray-500 absolute left-2.5 top-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                        </div>
+                        <div class="relative">
+                            <input id="filter-agent" placeholder="Agent Name..." class="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 pl-8 text-xs text-white w-40 focus:outline-none focus:border-blue-500/50 transition-all">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-gray-500 absolute left-2.5 top-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                        </div>
+                        <input id="filter-model" placeholder="Model..." class="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white w-32 focus:outline-none focus:border-blue-500/50 transition-all">
+                        <select id="filter-tool" class="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white w-32 focus:outline-none focus:border-blue-500/50 transition-all appearance-none">
+                            <option value="">All Tool Types</option>
+                            <option value="mcp">MCP</option>
+                            <option value="file_search">File Search</option>
+                            <option value="function">Function</option>
+                        </select>
+                        <button id="clear-filters-btn" class="ml-auto text-xs text-gray-400 hover:text-white underline">Clear All</button>
+                    </div>
+                </div>
+                
+                <!-- Graph Canvas -->
+                <div id="graph-view-container" class="flex-1 glass-card rounded-xl border border-white/10 relative overflow-hidden min-h-[600px]">
+                     <div id="cy" class="w-full h-full"></div>
+                     
+                     <!-- Legend Overlay -->
+                     <div class="absolute bottom-4 right-4 glass-panel p-4 rounded-lg text-xs space-y-2 border border-white/10 shadow-lg">
+                        <div class="font-semibold text-gray-300 mb-1 uppercase tracking-wider">Legend</div>
+                        <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-purple-500"></span> <span class="text-gray-300">Agent</span></div>
+                        <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-blue-400"></span> <span class="text-gray-300">Model</span></div>
+                        <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-yellow-400"></span> <span class="text-gray-300">Tool</span></div>
+                        <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-green-400"></span> <span class="text-gray-300">Resource</span></div>
+                     </div>
+                </div>
+
+                <!-- Table View (Hidden by default) -->
+                <div id="table-view-container" class="hidden flex-1 glass-card rounded-xl border border-white/10 overflow-hidden flex flex-col min-h-[600px]">
+                    <div class="overflow-x-auto flex-1">
+                        <table class="w-full text-left text-sm text-gray-400">
+                            <thead class="bg-white/5 text-xs uppercase text-gray-200 font-semibold">
+                                <tr>
+                                    <th class="px-6 py-4">Agent Name</th>
+                                    <th class="px-6 py-4">Project</th>
+                                    <th class="px-6 py-4">Model</th>
+                                    <th class="px-6 py-4">Tools</th>
+                                    <th class="px-6 py-4">Connections</th>
+                                    <th class="px-6 py-4">Access</th>
+                                </tr>
+                            </thead>
+                            <tbody id="global-table-body" class="divide-y divide-white/5">
+                                <!-- Rows injected by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Agent Detail Drawer (Slide-over) -->
+    <div id="agent-drawer" class="fixed inset-y-0 right-0 w-[500px] glass-panel border-l border-white/10 z-50 transform translate-x-full transition-transform duration-300 shadow-2xl flex flex-col">
+        <!-- Header -->
+        <div class="p-6 border-b border-white/10 flex justify-between items-start bg-black/20">
+            <div>
+                <h2 id="drawer-agent-name" class="text-xl font-semibold text-white mb-1">Agent Name</h2>
+                <div class="flex gap-2">
+                    <span class="badge-glass text-green-400">Active</span>
+                    <span class="badge-glass text-gray-400" id="drawer-agent-id">ID: ...</span>
+                </div>
+            </div>
+            <button onclick="closeDrawer()" class="text-gray-400 hover:text-white">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </div>
+        
+        <!-- Content -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-6">
+            <!-- Summary -->
+            <div class="space-y-4">
+                <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Configuration</h3>
+                <div class="glass-card p-4 rounded-lg space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-sm text-gray-400">Model</span>
+                        <span class="text-sm text-white font-medium" id="drawer-agent-model">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-sm text-gray-400">Project</span>
+                        <span class="text-sm text-white font-medium" id="drawer-agent-project">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-sm text-gray-400">Tools Count</span>
+                        <span class="text-sm text-white font-medium" id="drawer-agent-tools-count">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tools List -->
+            <div class="space-y-4">
+                <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Enabled Tools</h3>
+                <div id="drawer-tools-list" class="space-y-2">
+                    <!-- Tools injected here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="p-4 border-t border-white/10 bg-black/20 flex justify-end gap-3">
+            <button class="px-4 py-2 rounded-md text-sm text-white hover:bg-white/10 transition-colors">Export Config</button>
+            <button class="px-4 py-2 rounded-md text-sm bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20">Open in Foundry</button>
+        </div>
+    </div>
+
+    <!-- Access Control Drawer -->
+    <div id="access-drawer" class="fixed inset-y-0 right-0 w-[800px] glass-panel border-l border-white/10 z-50 transform translate-x-full transition-transform duration-300 shadow-2xl flex flex-col">
+        <!-- Header -->
+        <div class="p-6 border-b border-white/10 flex justify-between items-start bg-black/20">
+            <div>
+                <h2 class="text-xl font-semibold text-white mb-1">Access Control (IAM)</h2>
+                <p class="text-sm text-gray-400" id="access-drawer-subtitle">Role assignments for Project</p>
+            </div>
+            <button onclick="closeDrawer()" class="text-gray-400 hover:text-white">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </div>
+        
+        <!-- Content -->
+        <div class="flex-1 overflow-y-auto p-6">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm text-gray-400">
+                    <thead class="bg-white/5 text-xs uppercase text-gray-200 font-semibold">
+                        <tr>
+                            <th class="px-4 py-3">Name / ID</th>
+                            <th class="px-4 py-3">Type</th>
+                            <th class="px-4 py-3">Role</th>
+                            <th class="px-4 py-3">Scope</th>
+                        </tr>
+                    </thead>
+                    <tbody id="access-table-body" class="divide-y divide-white/5">
+                        <!-- Rows injected by JS -->
+                    </tbody>
+                </table>
+            </div>
+            <div id="access-loading" class="hidden flex justify-center py-8">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overlay for Drawer -->
+    <div id="drawer-overlay" onclick="closeDrawer()" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 hidden transition-opacity"></div>
+
+    <script src="/static/js/graph.js?v=3"></script>
+    <script>
+        // Simple Navigation Logic
+        function navigateTo(sectionId) {
+            // Hide all sections
+            document.querySelectorAll('main > section').forEach(el => {
+                el.classList.add('hidden');
+            });
+            // Show target
+            document.getElementById(sectionId).classList.remove('hidden');
+            
+            // Update Nav State
+            document.querySelectorAll('.nav-item').forEach(el => {
+                el.classList.remove('active');
+                el.style.borderLeft = 'none';
+                el.style.background = 'transparent';
+                el.style.color = '#9ca3af';
+            });
+            
+            const activeBtn = document.querySelector(`button[data-target="${sectionId}"]`);
+            if(activeBtn) {
+                activeBtn.classList.add('active');
+                activeBtn.style.background = 'rgba(0, 120, 212, 0.15)';
+                activeBtn.style.color = '#60cdff';
+                activeBtn.style.borderLeft = '3px solid #60cdff';
+            }
+
+            // Trigger graph resize if needed
+            if(sectionId === 'section-graph' && window.cy) {
+                setTimeout(() => window.cy.resize(), 100);
+            }
+        }
+
+        // Drawer Logic
+        function openDrawer(agent) {
+            const drawer = document.getElementById('agent-drawer');
+            const overlay = document.getElementById('drawer-overlay');
+            
+            // Populate Data
+            document.getElementById('drawer-agent-name').textContent = agent.name;
+            document.getElementById('drawer-agent-id').textContent = `ID: ${agent.id.substring(0,8)}...`;
+            document.getElementById('drawer-agent-model').textContent = agent.model || 'N/A';
+            document.getElementById('drawer-agent-project').textContent = agent.projectName || 'Unknown';
+            document.getElementById('drawer-agent-tools-count').textContent = agent.tools.length;
+
+            const toolsList = document.getElementById('drawer-tools-list');
+            toolsList.innerHTML = '';
+            agent.tools.forEach(tool => {
+                const div = document.createElement('div');
+                div.className = 'p-3 rounded bg-white/5 border border-white/5 flex items-center gap-3';
+                div.innerHTML = `
+                    <div class="w-8 h-8 rounded bg-yellow-500/10 text-yellow-500 flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    </div>
+                    <div>
+                        <div class="text-sm font-medium text-white">${tool.name || tool.type}</div>
+                        <div class="text-xs text-gray-500">${tool.connection || 'No connection'}</div>
+                    </div>
+                `;
+                toolsList.appendChild(div);
+            });
+
+            drawer.classList.remove('translate-x-full');
+            overlay.classList.remove('hidden');
+        }
+
+        function closeDrawer() {
+            document.getElementById('agent-drawer').classList.add('translate-x-full');
+            document.getElementById('access-drawer').classList.add('translate-x-full');
+            document.getElementById('drawer-overlay').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>

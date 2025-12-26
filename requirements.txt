@@ -1,0 +1,5 @@
+azure-ai-projects
+azure-identity
+requests
+fastapi
+uvicorn

@@ -8,7 +8,7 @@ Unlike standard project-level views, this tool operates at the **Subscription le
 
 ## 🚀 Key Features
 
-*   **🌍 Subscription-Wide Discovery**: Automatically scans your entire Azure subscription to locate every AI Agent across all Foundry Projects and Hubs.
+*   **🌍 Subscription-Wide Discovery**: Automatically scans your entire Azure subscription to locate every AI Agent across all Foundry Projects.
 *   **🕸️ Interactive Graph Visualization**: Visualizes complex dependencies between Agents, Models, Tools (File Search, Code Interpreter, MCP), and underlying Azure Resources.
 *   **📊 Governance Dashboard**: Provides high-level KPIs on agent proliferation, model usage distribution, and project utilization.
 *   **🔍 Deep Inspection**: Drill down into individual agent configurations, including enabled tools, connection strings, and access control (IAM) roles.

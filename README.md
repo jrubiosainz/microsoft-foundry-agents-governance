@@ -15,12 +15,12 @@ Unlike standard project-level views, this tool operates at the **Subscription le
 
 ## 📸 Screenshots
 
-### Interactive Graph Explorer
+### Interactive Graph Explorer or Table mode
 Visualize the relationships between your agents and their dependencies.
 ![Graph View](src/frontend/images/gov2.png)
 
-### Detailed Inventory & Inspection
-View tabular data and inspect specific agent configurations.
+### Agents insights
+View relevant graphs about your specific agent configurations.
 ![Inventory View](src/frontend/images/gov4.png)
 
 ## 🛠️ Prerequisites

@@ -33,7 +33,7 @@ View relevant graphs about your specific agent configurations.
 
 1.  **Clone the repository**:
     ```bash
-    git clone https://github.com/your-username/agents-governance.git
+    git clone https://github.com/jrubiosainz/microsoft-foundry-agents-governance.git
     cd agents-governance
     ```
 

@@ -4,7 +4,7 @@
 
 **Azure AI Foundry Agents Governance** is a comprehensive visualization and management tool designed to provide transparency and control over your AI Agent estate. 
 
-Unlike standard project-level views, this tool operates at the **Subscription level**, automatically discovering all Azure AI Foundry Hubs and Projects to build a complete inventory of your deployed Agents.
+Unlike standard project-level views, this tool operates at the **Subscription level**, automatically discovering all Azure AI Foundry Projects to build a complete inventory of your deployed Agents.
 
 ## 🚀 Key Features
 

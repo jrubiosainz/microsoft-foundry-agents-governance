@@ -1,0 +1,13 @@
+{
+  "name": "foundry-agents-governance-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Frontend build tooling (Tailwind CSS) for the Azure AI Foundry Agents Governance dashboard.",
+  "scripts": {
+    "build:css": "tailwindcss -i ./src/frontend/static/css/input.css -o ./src/frontend/static/css/tailwind.css --minify",
+    "watch:css": "tailwindcss -i ./src/frontend/static/css/input.css -o ./src/frontend/static/css/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

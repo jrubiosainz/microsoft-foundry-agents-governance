@@ -26,6 +26,20 @@ const ICONS = {
     default: "https://img.icons8.com/fluency/96/help.png"
 };
 
+// Debounce helper — coalesces rapid calls (e.g. filter typing) into one
+function debounce(fn, wait = 250) {
+    let timeout;
+    return function (...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => fn.apply(this, args), wait);
+    };
+}
+
+// Respect the user's reduced-motion preference for graph layout animation
+function prefersReducedMotion() {
+    return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 function updateLoadingState(isLoading) {
     const indicator = document.getElementById("global-loading-indicator");
     const text = document.getElementById("loading-text");
@@ -62,12 +76,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // Initialize Data
     loadAllData();
 
-    // Filter Event Listeners
+    // Filter Event Listeners (debounced to avoid rebuilding the graph on every keystroke)
     const filterInputs = ["filter-project", "filter-agent", "filter-model", "filter-tool"];
+    const debouncedFilters = debounce(applyGlobalFilters, 250);
     filterInputs.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-            el.addEventListener("input", applyGlobalFilters);
+            const evt = el.tagName === "SELECT" ? "change" : "input";
+            el.addEventListener(evt, debouncedFilters);
         }
     });
 
@@ -135,7 +151,7 @@ function renderGlobalTable(agents = allLoadedAgents) {
     if (!tbody) return;
 
     if (agents.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="px-6 py-8 text-center text-gray-500">No agents loaded yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="px-6 py-8 text-center text-gray-400">No agents loaded yet.</td></tr>`;
         return;
     }
 
@@ -147,21 +163,18 @@ function renderGlobalTable(agents = allLoadedAgents) {
             .join("");
         
         const accessCount = agent.accessCount !== undefined ? agent.accessCount : 'N/A';
-        const accessClick = agent.projectId ? `onclick="openAccessDrawer('${agent.projectId}', '${agent.projectName}')"` : '';
-        const accessClass = agent.projectId ? "text-blue-400 hover:text-blue-300 cursor-pointer underline decoration-dotted" : "text-gray-500";
+        const accessCell = agent.projectId
+            ? `<button type="button" onclick="openAccessDrawer('${agent.projectId}', '${agent.projectName}')" class="text-blue-400 hover:text-blue-300 underline decoration-dotted rounded focus-visible:outline-none">${accessCount} users</button>`
+            : `<span class="text-gray-400">${accessCount} users</span>`;
 
         return `
             <tr class="hover:bg-white/5 transition-colors border-b border-white/5 last:border-0">
                 <td class="px-6 py-4 font-medium text-white">${agent.name}</td>
                 <td class="px-6 py-4">${agent.projectName || '-'}</td>
                 <td class="px-6 py-4"><span class="px-2 py-1 rounded bg-blue-500/10 text-blue-400 text-xs border border-blue-500/20">${agent.model || 'N/A'}</span></td>
-                <td class="px-6 py-4">${tools || '<span class="text-gray-600">-</span>'}</td>
-                <td class="px-6 py-4">${connections || '<span class="text-gray-600">-</span>'}</td>
-                <td class="px-6 py-4">
-                    <span class="${accessClass}" ${accessClick}>
-                        ${accessCount} users
-                    </span>
-                </td>
+                <td class="px-6 py-4">${tools || '<span class="text-gray-400">-</span>'}</td>
+                <td class="px-6 py-4">${connections || '<span class="text-gray-400">-</span>'}</td>
+                <td class="px-6 py-4">${accessCell}</td>
             </tr>
         `;
     }).join("");
@@ -179,6 +192,7 @@ window.openAccessDrawer = async function(projectId, projectName) {
     loading.classList.remove('hidden');
     
     drawer.classList.remove('translate-x-full');
+    drawer.setAttribute('aria-hidden', 'false');
     overlay.classList.remove('hidden');
 
     try {
@@ -195,7 +209,7 @@ window.openAccessDrawer = async function(projectId, projectName) {
         const assignments = await response.json();
         
         if (assignments.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No role assignments found.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-gray-400">No role assignments found.</td></tr>`;
         } else {
             tbody.innerHTML = assignments.map(role => {
                 const props = role.properties;
@@ -220,7 +234,7 @@ window.openAccessDrawer = async function(projectId, projectName) {
                         <td class="px-4 py-3 font-medium text-white">${principalId}</td>
                         <td class="px-4 py-3 text-gray-400">${principalType}</td>
                         <td class="px-4 py-3 text-blue-400">${roleName}</td>
-                        <td class="px-4 py-3 text-gray-500 text-xs truncate max-w-[200px]" title="${role.id}">${role.id.split('/resourceGroups/')[1] || 'Subscription'}</td>
+                        <td class="px-4 py-3 text-gray-400 text-xs truncate max-w-[200px]" title="${role.id}">${role.id.split('/resourceGroups/')[1] || 'Subscription'}</td>
                     </tr>
                 `;
             }).join("");
@@ -605,7 +619,7 @@ function initCytoscape(elements) {
         ],
         layout: {
             name: "cose",
-            animate: true,
+            animate: !prefersReducedMotion(),
             randomize: true,
             componentSpacing: 80,
             nodeRepulsion: 400000,

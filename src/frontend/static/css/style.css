@@ -2,23 +2,33 @@
 :root {
     /* Backgrounds */
     --bg-app: #0f1117;
-    --bg-surface: rgba(30, 34, 45, 0.6);
-    --bg-card: rgba(255, 255, 255, 0.04);
-    --bg-card-hover: rgba(255, 255, 255, 0.08);
+    --bg-surface: rgba(30, 34, 45, 0.6);        /* Acrylic layer (overlays/chrome) */
+    --bg-elevated: #191c23;                      /* Solid content-card surface */
+    --bg-elevated-hover: #1f232c;                /* Solid card hover */
     --bg-input: rgba(0, 0, 0, 0.2);
-    
+
     /* Accents */
     --accent-primary: #0078d4;
     --accent-secondary: #60cdff;
     --accent-purple: #8a2be2;
-    
+
+    /* Semantic status (foreground colors tuned for dark bg) */
+    --status-success: #4ade80;
+    --status-warning: #fde047;
+    --status-error: #f87171;
+    --status-info: #60a5fa;
+
     /* Borders & Shadows */
     --border-glass: 1px solid rgba(255, 255, 255, 0.08);
+    --border-solid: 1px solid rgba(255, 255, 255, 0.06);
     --shadow-card: 0 4px 24px -1px rgba(0, 0, 0, 0.2);
     --shadow-glow: 0 0 15px rgba(96, 205, 255, 0.15);
-    
+
+    /* Focus ring */
+    --focus-ring: 0 0 0 2px var(--bg-app), 0 0 0 4px var(--accent-secondary);
+
     /* Typography */
-    --font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif;
+    --font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
 }
 
 /* Base Styles */
@@ -28,30 +38,32 @@ body {
     font-family: var(--font-family);
 }
 
-/* Acrylic / Glass Utilities */
+/* Acrylic / Glass Utilities (reserved for chrome + overlays) */
 .glass-panel {
     background: var(--bg-surface);
     backdrop-filter: blur(20px) saturate(125%);
+    -webkit-backdrop-filter: blur(20px) saturate(125%);
     border-right: var(--border-glass); /* Default for sidebar */
 }
 
 .glass-header {
     background: rgba(15, 17, 23, 0.7);
     backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border-bottom: var(--border-glass);
 }
 
-.glass-card {
-    background: var(--bg-card);
-    border: var(--border-glass);
-    backdrop-filter: blur(10px);
-    transition: all 0.2s ease;
+/* Solid content surface (default for cards, panels, containers) */
+.surface-card {
+    background: var(--bg-elevated);
+    border: var(--border-solid);
+    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.glass-card:hover {
-    background: var(--bg-card-hover);
-    box-shadow: var(--shadow-glow);
-    border-color: rgba(255, 255, 255, 0.2);
+.surface-card.interactive:hover {
+    background: var(--bg-elevated-hover);
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: var(--shadow-card);
 }
 
 .badge-glass {
@@ -63,6 +75,19 @@ body {
     font-weight: 500;
 }
 
+/* Graph legend swatches (kept as tokens so labels stay on the dark panel) */
+.legend-dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    flex-shrink: 0;
+}
+.legend-dot--agent { background: #a855f7; }
+.legend-dot--model { background: #60a5fa; }
+.legend-dot--tool { background: #facc15; }
+.legend-dot--resource { background: #4ade80; }
+
 /* Navigation Items */
 .nav-item {
     display: flex;
@@ -71,8 +96,8 @@ body {
     padding: 10px 16px;
     width: 100%;
     border-radius: 6px;
-    color: #9ca3af; /* Gray-400 */
-    transition: all 0.15s ease;
+    color: #9ca3af; /* Gray-400 (7.4:1 on app bg) */
+    transition: background 0.15s ease, color 0.15s ease;
     font-size: 0.9rem;
     font-weight: 500;
 }
@@ -85,7 +110,32 @@ body {
 .nav-item.active {
     background: rgba(0, 120, 212, 0.15); /* Azure tint */
     color: #60cdff;
-    border-left: 3px solid #60cdff;
+    box-shadow: inset 3px 0 0 0 #60cdff; /* Accent rail without layout-shifting border */
+}
+
+/* Unified focus-visible ring across all interactive elements */
+a:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: 6px;
+}
+
+/* Screen-reader-only helper */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }
 
 /* Animations */
@@ -98,10 +148,10 @@ body {
     animation: fadeIn 0.4s ease-out forwards;
 }
 
-/* Custom Scrollbar */
+/* Custom Scrollbar (dark-theme aware) */
 ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -109,12 +159,16 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #e5e7eb;
-    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #d1d5db;
+    background: rgba(255, 255, 255, 0.28);
+}
+
+* {
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
 /* Cytoscape Container */
@@ -129,4 +183,22 @@ body {
     transition-property: all;
     transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     transition-duration: 150ms;
+}
+
+/* Respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    .animate-fade-in {
+        animation: none;
+        opacity: 1;
+        transform: none;
+    }
 }

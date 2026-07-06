@@ -6,10 +6,12 @@ let allLoadedAgents = []; // Store all loaded agents for global graph/KPIs
 let charts = {}; // Store Chart.js instances
 let activeLoadingRequests = 0; // Track active fetches
 let selectedProjects = new Set(); // Project names selected in the multi-select filter
+let selectedAgents = new Set();   // Agent names selected in the multi-select filter
+let selectedModels = new Set();   // Model names selected in the multi-select filter
 const projectColorMap = {};        // projectName -> stable color (shared by dropdown + graph)
 
-// Multi-select dropdown element refs (populated by initProjectMultiselect)
-let _msBtn = null, _msPanel = null, _msList = null, _msSearch = null, _msOpen = false;
+// Multi-select controllers (created by initMultiselects)
+let msProject = null, msAgent = null, msModel = null;
 let debouncedApply = null;
 
 // Distinct Colors for Agents
@@ -18,18 +20,23 @@ const AGENT_COLORS = [
     "#0078d4", "#5c2d91", "#107c10", "#d83b01", "#b4009e"
 ];
 
-// Icons Map (Fluent UI Style)
+// Icons Map — official service logos vendored under /static/images/logos
 const ICONS = {
-    agent: "/static/images/agent_logo.png",
-    model: "https://img.icons8.com/fluency/96/artificial-intelligence.png",
-    tool: "https://img.icons8.com/fluency/96/maintenance.png",
+    agent: "/static/images/foundry_logo.png",              // Foundry Agent Service
+    model: "/static/images/logos/openai.svg",              // Azure OpenAI / model deployments
+    tool: "/static/images/logos/function.svg",             // generic tool = Azure Functions
     github: "/static/images/github_logo.png",
-    search: "https://img.icons8.com/fluency/96/search.png",
-    code: "https://img.icons8.com/fluency/96/code.png",
-    database: "https://img.icons8.com/fluency/96/database.png",
-    connection: "https://img.icons8.com/fluency/96/link.png",
-    resource: "https://img.icons8.com/fluency/96/folder-invoices.png",
-    default: "https://img.icons8.com/fluency/96/help.png"
+    search: "/static/images/logos/ai-search.svg",          // search-type tools (grounding)
+    aisearch: "/static/images/logos/ai-search.svg",        // Azure AI Search connections
+    code: "/static/images/logos/code.svg",                 // code interpreter
+    database: "/static/images/logos/sql.svg",              // Azure SQL / databases
+    storage: "/static/images/logos/storage.svg",           // Azure Storage / blob
+    mcp: "/static/images/logos/mcp.svg",                   // Model Context Protocol
+    cognitive: "/static/images/logos/cognitive.svg",       // Azure AI Services
+    bot: "/static/images/logos/bot.svg",                   // Azure Bot Service
+    connection: "/static/images/logos/resource.svg",
+    resource: "/static/images/logos/resource.svg",
+    default: "/static/images/logos/resource.svg"
 };
 
 // Debounce helper — coalesces rapid calls (e.g. filter typing) into one
@@ -83,8 +90,8 @@ document.addEventListener("DOMContentLoaded", () => {
     loadAllData();
 
     // Filter Event Listeners (debounced to avoid rebuilding the graph on every keystroke)
-    // Project is handled by a dedicated multi-select control (initProjectMultiselect).
-    const filterInputs = ["filter-agent", "filter-model", "filter-tool"];
+    // Project / Agent / Model are handled by dedicated multi-select controls (initMultiselects).
+    const filterInputs = ["filter-tool"];
     const debouncedFilters = debounce(applyGlobalFilters, 250);
     filterInputs.forEach(id => {
         const el = document.getElementById(id);
@@ -94,8 +101,8 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Project multi-select dropdown
-    initProjectMultiselect();
+    // Project / Agent / Model multi-select dropdowns
+    initMultiselects();
 
     // Clear Filters
     const clearBtn = document.getElementById("clear-filters-btn");
@@ -106,8 +113,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (el) el.value = "";
             });
             selectedProjects.clear();
-            syncProjectSelectionUI();
-            if (_msOpen) renderProjectList(_msSearch ? _msSearch.value : "");
+            selectedAgents.clear();
+            selectedModels.clear();
+            [msProject, msAgent, msModel].forEach(ms => ms && ms.refresh());
             applyGlobalFilters();
         });
     }
@@ -290,7 +298,7 @@ async function loadAllData() {
         const agentsArrays = await Promise.all(allAgentsPromises);
         allLoadedAgents = agentsArrays.flat();
 
-        populateProjectOptions();
+        populateFilterOptions();
         updateKPIs();
         applyGlobalFilters(); // This will render graph and table
 
@@ -357,158 +365,192 @@ function getProjectStats() {
         .map(name => ({ name, count: counts[name], color: ensureProjectColor(name) }));
 }
 
-function populateProjectOptions() {
-    // Pre-assign stable colors (alphabetical) so swatches stay consistent across renders
+// Distinct agent names present in the loaded data, with occurrence counts
+function getAgentStats() {
+    const counts = {};
+    allLoadedAgents.forEach(a => {
+        const n = a.name || "Unnamed";
+        counts[n] = (counts[n] || 0) + 1;
+    });
+    return Object.keys(counts)
+        .sort((a, b) => a.localeCompare(b))
+        .map(name => ({ name, count: counts[name], color: "#a855f7" }));
+}
+
+// Distinct models present in the loaded data, with usage counts (busiest first)
+function getModelStats() {
+    const counts = {};
+    allLoadedAgents.forEach(a => { if (a.model) counts[a.model] = (counts[a.model] || 0) + 1; });
+    return Object.keys(counts)
+        .sort((a, b) => counts[b] - counts[a] || a.localeCompare(b))
+        .map(name => ({ name, count: counts[name], color: "#3b82f6" }));
+}
+
+function populateFilterOptions() {
+    // Pre-assign stable project colors (alphabetical) so swatches stay consistent across renders
     [...new Set(allLoadedAgents.map(a => a.projectName || "Unassigned"))]
         .sort((a, b) => a.localeCompare(b))
         .forEach(ensureProjectColor);
 
-    if (_msOpen) renderProjectList(_msSearch ? _msSearch.value : "");
-    syncProjectSelectionUI();
+    [msProject, msAgent, msModel].forEach(ms => ms && ms.refresh());
 }
 
-function initProjectMultiselect() {
-    _msBtn = document.getElementById("filter-project-btn");
-    if (!_msBtn) return;
+// Reusable multi-select dropdown. One instance per filter (project / agent / model).
+// The panel is appended to <body> with position:fixed so it escapes the scrollable
+// filter bar / main overflow context (no clipping), per the interaction rules.
+function createMultiSelect(opts) {
+    const btn = document.getElementById(opts.triggerId);
+    if (!btn) return null;
+    const labelEl = btn.querySelector(".ms-trigger__label");
+    const countEl = btn.querySelector(".ms-trigger__count");
 
-    debouncedApply = debounce(applyGlobalFilters, 220);
-
-    // Panel is appended to <body> with position:fixed so it escapes the
-    // scrollable filter bar / main overflow context (no clipping).
-    _msPanel = document.createElement("div");
-    _msPanel.className = "ms-panel hidden";
-    _msPanel.setAttribute("role", "dialog");
-    _msPanel.setAttribute("aria-label", "Select projects");
-    _msPanel.innerHTML =
-        '<input type="text" class="ms-panel__search" placeholder="Search projects..." aria-label="Search projects">' +
+    const panel = document.createElement("div");
+    panel.className = "ms-panel hidden";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", opts.dialogLabel);
+    panel.innerHTML =
+        '<input type="text" class="ms-panel__search" placeholder="' + opts.searchPlaceholder + '" aria-label="' + opts.searchPlaceholder + '">' +
         '<div class="ms-panel__actions">' +
             '<button type="button" class="ms-panel__action" data-act="all">Select all</button>' +
             '<button type="button" class="ms-panel__action" data-act="clear">Clear</button>' +
         '</div>' +
         '<ul class="ms-panel__list" role="listbox" aria-multiselectable="true"></ul>';
-    document.body.appendChild(_msPanel);
-    _msSearch = _msPanel.querySelector(".ms-panel__search");
-    _msList = _msPanel.querySelector(".ms-panel__list");
+    document.body.appendChild(panel);
+    const search = panel.querySelector(".ms-panel__search");
+    const list = panel.querySelector(".ms-panel__list");
+    const debounced = debounce(opts.onChange, 220);
+    let open = false;
 
-    _msBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleProjectPanel(); });
-    _msSearch.addEventListener("input", () => renderProjectList(_msSearch.value));
-    _msPanel.querySelector('[data-act="all"]').addEventListener("click", () => {
-        getProjectStats()
-            .filter(p => !_msSearch.value || p.name.toLowerCase().includes(_msSearch.value.toLowerCase()))
-            .forEach(p => selectedProjects.add(p.name));
-        renderProjectList(_msSearch.value);
-        syncProjectSelectionUI();
-        applyGlobalFilters();
-    });
-    _msPanel.querySelector('[data-act="clear"]').addEventListener("click", () => {
-        selectedProjects.clear();
-        renderProjectList(_msSearch.value);
-        syncProjectSelectionUI();
-        applyGlobalFilters();
-    });
+    function renderList(text) {
+        const q = (text || "").toLowerCase();
+        const stats = opts.getStats().filter(s => !q || s.name.toLowerCase().includes(q));
+        if (stats.length === 0) {
+            list.innerHTML = '<li class="ms-panel__empty">' +
+                (allLoadedAgents.length ? "No matches" : "Nothing loaded yet") + "</li>";
+            return;
+        }
+        list.innerHTML = stats.map(s => {
+            const safe = escapeHtml(s.name);
+            const checked = opts.selected.has(s.name) ? "checked" : "";
+            const swatch = s.color
+                ? '<span class="ms-option__swatch" style="background:' + s.color + '"></span>'
+                : "";
+            return '<li><label class="ms-option">' +
+                '<input type="checkbox" value="' + safe + '" ' + checked + '>' +
+                swatch +
+                '<span class="ms-option__name" title="' + safe + '">' + safe + '</span>' +
+                '<span class="ms-option__count">' + s.count + '</span>' +
+            '</label></li>';
+        }).join("");
+        list.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.addEventListener("change", () => {
+                if (cb.checked) opts.selected.add(cb.value);
+                else opts.selected.delete(cb.value);
+                syncUI();
+                debounced();
+            });
+        });
+    }
 
+    function syncUI() {
+        if (!labelEl) return;
+        const n = opts.selected.size;
+        if (n === 0) {
+            labelEl.textContent = opts.allLabel;
+            if (countEl) countEl.classList.add("hidden");
+        } else if (n === 1) {
+            labelEl.textContent = [...opts.selected][0];
+            if (countEl) countEl.classList.add("hidden");
+        } else {
+            labelEl.textContent = opts.pluralLabel;
+            if (countEl) { countEl.textContent = String(n); countEl.classList.remove("hidden"); }
+        }
+    }
+
+    function position() {
+        const r = btn.getBoundingClientRect();
+        const panelW = panel.offsetWidth || 256;
+        const left = Math.max(8, Math.min(r.left, window.innerWidth - panelW - 8));
+        panel.style.top = (r.bottom + 6) + "px";
+        panel.style.left = left + "px";
+    }
+    function openPanel() {
+        open = true;
+        btn.setAttribute("aria-expanded", "true");
+        search.value = "";
+        renderList("");
+        panel.classList.remove("hidden");
+        position();
+        search.focus();
+    }
+    function closePanel() {
+        open = false;
+        btn.setAttribute("aria-expanded", "false");
+        panel.classList.add("hidden");
+    }
+
+    btn.addEventListener("click", (e) => { e.stopPropagation(); open ? closePanel() : openPanel(); });
+    search.addEventListener("input", () => renderList(search.value));
+    panel.querySelector('[data-act="all"]').addEventListener("click", () => {
+        opts.getStats()
+            .filter(s => !search.value || s.name.toLowerCase().includes(search.value.toLowerCase()))
+            .forEach(s => opts.selected.add(s.name));
+        renderList(search.value);
+        syncUI();
+        opts.onChange();
+    });
+    panel.querySelector('[data-act="clear"]').addEventListener("click", () => {
+        opts.selected.clear();
+        renderList(search.value);
+        syncUI();
+        opts.onChange();
+    });
     document.addEventListener("click", (e) => {
-        if (_msOpen && !_msPanel.contains(e.target) && !_msBtn.contains(e.target)) closeProjectPanel();
+        if (open && !panel.contains(e.target) && !btn.contains(e.target)) closePanel();
     });
     document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && _msOpen) { closeProjectPanel(); _msBtn.focus(); }
+        if (e.key === "Escape" && open) { closePanel(); btn.focus(); }
     });
-    window.addEventListener("resize", () => { if (_msOpen) positionProjectPanel(); });
-    window.addEventListener("scroll", () => { if (_msOpen) positionProjectPanel(); }, true);
+    window.addEventListener("resize", () => { if (open) position(); });
+    window.addEventListener("scroll", () => { if (open) position(); }, true);
+
+    return {
+        refresh() { if (open) renderList(search.value); syncUI(); },
+        syncUI
+    };
 }
 
-function renderProjectList(text) {
-    if (!_msList) return;
-    const q = (text || "").toLowerCase();
-    const stats = getProjectStats().filter(p => !q || p.name.toLowerCase().includes(q));
-
-    if (stats.length === 0) {
-        _msList.innerHTML = '<li class="ms-panel__empty">' +
-            (allLoadedAgents.length ? "No projects match" : "No projects loaded yet") + "</li>";
-        return;
-    }
-
-    _msList.innerHTML = stats.map(p => {
-        const safe = escapeHtml(p.name);
-        const checked = selectedProjects.has(p.name) ? "checked" : "";
-        return '<li><label class="ms-option">' +
-            '<input type="checkbox" value="' + safe + '" ' + checked + '>' +
-            '<span class="ms-option__swatch" style="background:' + p.color + '"></span>' +
-            '<span class="ms-option__name" title="' + safe + '">' + safe + '</span>' +
-            '<span class="ms-option__count">' + p.count + '</span>' +
-        '</label></li>';
-    }).join("");
-
-    _msList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        cb.addEventListener("change", () => {
-            if (cb.checked) selectedProjects.add(cb.value);
-            else selectedProjects.delete(cb.value);
-            syncProjectSelectionUI();
-            debouncedApply();
-        });
+function initMultiselects() {
+    debouncedApply = debounce(applyGlobalFilters, 220);
+    msProject = createMultiSelect({
+        triggerId: "filter-project-btn", dialogLabel: "Select projects",
+        searchPlaceholder: "Search projects...", allLabel: "All Projects", pluralLabel: "Projects",
+        selected: selectedProjects, getStats: getProjectStats, onChange: applyGlobalFilters
     });
-}
-
-function syncProjectSelectionUI() {
-    const label = document.getElementById("filter-project-label");
-    const countEl = document.getElementById("filter-project-count");
-    if (!label || !countEl) return;
-    const n = selectedProjects.size;
-    if (n === 0) {
-        label.textContent = "All Projects";
-        countEl.classList.add("hidden");
-    } else if (n === 1) {
-        label.textContent = [...selectedProjects][0];
-        countEl.classList.add("hidden");
-    } else {
-        label.textContent = "Projects";
-        countEl.textContent = String(n);
-        countEl.classList.remove("hidden");
-    }
-}
-
-function toggleProjectPanel() { _msOpen ? closeProjectPanel() : openProjectPanel(); }
-
-function openProjectPanel() {
-    _msOpen = true;
-    _msBtn.setAttribute("aria-expanded", "true");
-    _msSearch.value = "";
-    renderProjectList("");
-    _msPanel.classList.remove("hidden");
-    positionProjectPanel();
-    _msSearch.focus();
-}
-
-function closeProjectPanel() {
-    _msOpen = false;
-    _msBtn.setAttribute("aria-expanded", "false");
-    _msPanel.classList.add("hidden");
-}
-
-function positionProjectPanel() {
-    const r = _msBtn.getBoundingClientRect();
-    const panelW = _msPanel.offsetWidth || 256;
-    const maxLeft = window.innerWidth - panelW - 8;
-    const left = Math.max(8, Math.min(r.left, maxLeft));
-    _msPanel.style.top = (r.bottom + 6) + "px";
-    _msPanel.style.left = left + "px";
+    msAgent = createMultiSelect({
+        triggerId: "filter-agent-btn", dialogLabel: "Select agents",
+        searchPlaceholder: "Search agents...", allLabel: "All Agents", pluralLabel: "Agents",
+        selected: selectedAgents, getStats: getAgentStats, onChange: applyGlobalFilters
+    });
+    msModel = createMultiSelect({
+        triggerId: "filter-model-btn", dialogLabel: "Select models",
+        searchPlaceholder: "Search models...", allLabel: "All Models", pluralLabel: "Models",
+        selected: selectedModels, getStats: getModelStats, onChange: applyGlobalFilters
+    });
 }
 
 function applyGlobalFilters() {
-    const agentFilter = document.getElementById("filter-agent").value.toLowerCase();
-    const modelFilter = document.getElementById("filter-model").value.toLowerCase();
-    const toolFilter = document.getElementById("filter-tool").value.toLowerCase();
+    const toolFilter = (document.getElementById("filter-tool").value || "").toLowerCase();
 
-    // Filter the global list of agents
+    // Filter the global list of agents by the multi-select sets (empty set = all)
     const filteredAgents = allLoadedAgents.filter(agent => {
         const projName = agent.projectName || "Unassigned";
-        const a = (agent.name || "").toLowerCase();
-        const m = (agent.model || "").toLowerCase();
-        const t = agent.tools.map(tool => (tool.name || tool.type).toLowerCase()).join(" ");
+        const agentName = agent.name || "Unnamed";
+        const t = agent.tools.map(tool => (tool.name || tool.type || "").toLowerCase()).join(" ");
 
         return (selectedProjects.size === 0 || selectedProjects.has(projName)) &&
-               (!agentFilter || a.includes(agentFilter)) &&
-               (!modelFilter || m.includes(modelFilter)) &&
+               (selectedAgents.size === 0 || selectedAgents.has(agentName)) &&
+               (selectedModels.size === 0 || (agent.model && selectedModels.has(agent.model))) &&
                (!toolFilter || t.includes(toolFilter));
     });
 
@@ -711,10 +753,11 @@ function renderGlobalGraph(agents = allLoadedAgents) {
             const tl = (tool.type || "").toLowerCase();
 
             let icon = ICONS.tool;
-            if (tl.includes("search")) icon = ICONS.search;
+            if (tl.includes("mcp")) icon = ICONS.mcp;
+            else if (tl.includes("search") || tl.includes("bing") || tl.includes("grounding")) icon = ICONS.search;
             else if (tl.includes("code")) icon = ICONS.code;
-            else if (tl.includes("retrieval")) icon = ICONS.database;
-            else if (tl.includes("mcp")) icon = "https://img.icons8.com/fluency/96/api-settings.png";
+            else if (tl.includes("retrieval") || tl.includes("file")) icon = ICONS.database;
+            else if (tl.includes("function")) icon = ICONS.tool;
 
             // Tool Node
             elements.push({
@@ -739,8 +782,12 @@ function renderGlobalGraph(agents = allLoadedAgents) {
                 const cn = connName.toLowerCase();
 
                 if (cn.includes("github")) connIcon = ICONS.github;
-                else if (cn.includes("search")) connIcon = ICONS.search;
-                else if (cn.includes("database") || cn.includes("sql")) connIcon = ICONS.database;
+                else if (cn.includes("search")) connIcon = ICONS.aisearch;
+                else if (cn.includes("sql") || cn.includes("database") || cn.includes("cosmos")) connIcon = ICONS.database;
+                else if (cn.includes("storage") || cn.includes("blob")) connIcon = ICONS.storage;
+                else if (cn.includes("openai") || cn.includes("aoai")) connIcon = ICONS.model;
+                else if (cn.includes("cognitive") || cn.includes("aiservice") || cn.includes("ai service")) connIcon = ICONS.cognitive;
+                else if (cn.includes("bot")) connIcon = ICONS.bot;
 
                 elements.push({
                     data: {

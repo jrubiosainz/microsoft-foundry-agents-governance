@@ -5,6 +5,12 @@ let resourceCache = {};
 let allLoadedAgents = []; // Store all loaded agents for global graph/KPIs
 let charts = {}; // Store Chart.js instances
 let activeLoadingRequests = 0; // Track active fetches
+let selectedProjects = new Set(); // Project names selected in the multi-select filter
+const projectColorMap = {};        // projectName -> stable color (shared by dropdown + graph)
+
+// Multi-select dropdown element refs (populated by initProjectMultiselect)
+let _msBtn = null, _msPanel = null, _msList = null, _msSearch = null, _msOpen = false;
+let debouncedApply = null;
 
 // Distinct Colors for Agents
 const AGENT_COLORS = [
@@ -77,7 +83,8 @@ document.addEventListener("DOMContentLoaded", () => {
     loadAllData();
 
     // Filter Event Listeners (debounced to avoid rebuilding the graph on every keystroke)
-    const filterInputs = ["filter-project", "filter-agent", "filter-model", "filter-tool"];
+    // Project is handled by a dedicated multi-select control (initProjectMultiselect).
+    const filterInputs = ["filter-agent", "filter-model", "filter-tool"];
     const debouncedFilters = debounce(applyGlobalFilters, 250);
     filterInputs.forEach(id => {
         const el = document.getElementById(id);
@@ -87,14 +94,20 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
+    // Project multi-select dropdown
+    initProjectMultiselect();
+
     // Clear Filters
     const clearBtn = document.getElementById("clear-filters-btn");
     if(clearBtn) {
         clearBtn.addEventListener("click", () => {
             filterInputs.forEach(id => {
                 const el = document.getElementById(id);
-                el.value = "";
+                if (el) el.value = "";
             });
+            selectedProjects.clear();
+            syncProjectSelectionUI();
+            if (_msOpen) renderProjectList(_msSearch ? _msSearch.value : "");
             applyGlobalFilters();
         });
     }
@@ -277,6 +290,7 @@ async function loadAllData() {
         const agentsArrays = await Promise.all(allAgentsPromises);
         allLoadedAgents = agentsArrays.flat();
 
+        populateProjectOptions();
         updateKPIs();
         applyGlobalFilters(); // This will render graph and table
 
@@ -314,20 +328,185 @@ async function fetchAgentsForProjects(projects) {
     return allAgents;
 }
 
+// --- Project multi-select dropdown ---------------------------------------
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[c]));
+}
+
+// Assign a stable color per project (shared between the dropdown swatch and the graph cluster)
+function ensureProjectColor(name) {
+    if (!projectColorMap[name]) {
+        const idx = Object.keys(projectColorMap).length % AGENT_COLORS.length;
+        projectColorMap[name] = AGENT_COLORS[idx];
+    }
+    return projectColorMap[name];
+}
+
+// Projects present in the loaded data, with agent counts, sorted by count desc then name
+function getProjectStats() {
+    const counts = {};
+    allLoadedAgents.forEach(a => {
+        const n = a.projectName || "Unassigned";
+        counts[n] = (counts[n] || 0) + 1;
+    });
+    return Object.keys(counts)
+        .sort((a, b) => counts[b] - counts[a] || a.localeCompare(b))
+        .map(name => ({ name, count: counts[name], color: ensureProjectColor(name) }));
+}
+
+function populateProjectOptions() {
+    // Pre-assign stable colors (alphabetical) so swatches stay consistent across renders
+    [...new Set(allLoadedAgents.map(a => a.projectName || "Unassigned"))]
+        .sort((a, b) => a.localeCompare(b))
+        .forEach(ensureProjectColor);
+
+    if (_msOpen) renderProjectList(_msSearch ? _msSearch.value : "");
+    syncProjectSelectionUI();
+}
+
+function initProjectMultiselect() {
+    _msBtn = document.getElementById("filter-project-btn");
+    if (!_msBtn) return;
+
+    debouncedApply = debounce(applyGlobalFilters, 220);
+
+    // Panel is appended to <body> with position:fixed so it escapes the
+    // scrollable filter bar / main overflow context (no clipping).
+    _msPanel = document.createElement("div");
+    _msPanel.className = "ms-panel hidden";
+    _msPanel.setAttribute("role", "dialog");
+    _msPanel.setAttribute("aria-label", "Select projects");
+    _msPanel.innerHTML =
+        '<input type="text" class="ms-panel__search" placeholder="Search projects..." aria-label="Search projects">' +
+        '<div class="ms-panel__actions">' +
+            '<button type="button" class="ms-panel__action" data-act="all">Select all</button>' +
+            '<button type="button" class="ms-panel__action" data-act="clear">Clear</button>' +
+        '</div>' +
+        '<ul class="ms-panel__list" role="listbox" aria-multiselectable="true"></ul>';
+    document.body.appendChild(_msPanel);
+    _msSearch = _msPanel.querySelector(".ms-panel__search");
+    _msList = _msPanel.querySelector(".ms-panel__list");
+
+    _msBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleProjectPanel(); });
+    _msSearch.addEventListener("input", () => renderProjectList(_msSearch.value));
+    _msPanel.querySelector('[data-act="all"]').addEventListener("click", () => {
+        getProjectStats()
+            .filter(p => !_msSearch.value || p.name.toLowerCase().includes(_msSearch.value.toLowerCase()))
+            .forEach(p => selectedProjects.add(p.name));
+        renderProjectList(_msSearch.value);
+        syncProjectSelectionUI();
+        applyGlobalFilters();
+    });
+    _msPanel.querySelector('[data-act="clear"]').addEventListener("click", () => {
+        selectedProjects.clear();
+        renderProjectList(_msSearch.value);
+        syncProjectSelectionUI();
+        applyGlobalFilters();
+    });
+
+    document.addEventListener("click", (e) => {
+        if (_msOpen && !_msPanel.contains(e.target) && !_msBtn.contains(e.target)) closeProjectPanel();
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && _msOpen) { closeProjectPanel(); _msBtn.focus(); }
+    });
+    window.addEventListener("resize", () => { if (_msOpen) positionProjectPanel(); });
+    window.addEventListener("scroll", () => { if (_msOpen) positionProjectPanel(); }, true);
+}
+
+function renderProjectList(text) {
+    if (!_msList) return;
+    const q = (text || "").toLowerCase();
+    const stats = getProjectStats().filter(p => !q || p.name.toLowerCase().includes(q));
+
+    if (stats.length === 0) {
+        _msList.innerHTML = '<li class="ms-panel__empty">' +
+            (allLoadedAgents.length ? "No projects match" : "No projects loaded yet") + "</li>";
+        return;
+    }
+
+    _msList.innerHTML = stats.map(p => {
+        const safe = escapeHtml(p.name);
+        const checked = selectedProjects.has(p.name) ? "checked" : "";
+        return '<li><label class="ms-option">' +
+            '<input type="checkbox" value="' + safe + '" ' + checked + '>' +
+            '<span class="ms-option__swatch" style="background:' + p.color + '"></span>' +
+            '<span class="ms-option__name" title="' + safe + '">' + safe + '</span>' +
+            '<span class="ms-option__count">' + p.count + '</span>' +
+        '</label></li>';
+    }).join("");
+
+    _msList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener("change", () => {
+            if (cb.checked) selectedProjects.add(cb.value);
+            else selectedProjects.delete(cb.value);
+            syncProjectSelectionUI();
+            debouncedApply();
+        });
+    });
+}
+
+function syncProjectSelectionUI() {
+    const label = document.getElementById("filter-project-label");
+    const countEl = document.getElementById("filter-project-count");
+    if (!label || !countEl) return;
+    const n = selectedProjects.size;
+    if (n === 0) {
+        label.textContent = "All Projects";
+        countEl.classList.add("hidden");
+    } else if (n === 1) {
+        label.textContent = [...selectedProjects][0];
+        countEl.classList.add("hidden");
+    } else {
+        label.textContent = "Projects";
+        countEl.textContent = String(n);
+        countEl.classList.remove("hidden");
+    }
+}
+
+function toggleProjectPanel() { _msOpen ? closeProjectPanel() : openProjectPanel(); }
+
+function openProjectPanel() {
+    _msOpen = true;
+    _msBtn.setAttribute("aria-expanded", "true");
+    _msSearch.value = "";
+    renderProjectList("");
+    _msPanel.classList.remove("hidden");
+    positionProjectPanel();
+    _msSearch.focus();
+}
+
+function closeProjectPanel() {
+    _msOpen = false;
+    _msBtn.setAttribute("aria-expanded", "false");
+    _msPanel.classList.add("hidden");
+}
+
+function positionProjectPanel() {
+    const r = _msBtn.getBoundingClientRect();
+    const panelW = _msPanel.offsetWidth || 256;
+    const maxLeft = window.innerWidth - panelW - 8;
+    const left = Math.max(8, Math.min(r.left, maxLeft));
+    _msPanel.style.top = (r.bottom + 6) + "px";
+    _msPanel.style.left = left + "px";
+}
+
 function applyGlobalFilters() {
-    const projectFilter = document.getElementById("filter-project").value.toLowerCase();
     const agentFilter = document.getElementById("filter-agent").value.toLowerCase();
     const modelFilter = document.getElementById("filter-model").value.toLowerCase();
     const toolFilter = document.getElementById("filter-tool").value.toLowerCase();
 
     // Filter the global list of agents
     const filteredAgents = allLoadedAgents.filter(agent => {
-        const p = (agent.projectName || "").toLowerCase();
+        const projName = agent.projectName || "Unassigned";
         const a = (agent.name || "").toLowerCase();
         const m = (agent.model || "").toLowerCase();
         const t = agent.tools.map(tool => (tool.name || tool.type).toLowerCase()).join(" ");
 
-        return (!projectFilter || p.includes(projectFilter)) &&
+        return (selectedProjects.size === 0 || selectedProjects.has(projName)) &&
                (!agentFilter || a.includes(agentFilter)) &&
                (!modelFilter || m.includes(modelFilter)) &&
                (!toolFilter || t.includes(toolFilter));
@@ -456,9 +635,9 @@ function renderChart(canvasId, type, label, dataMap, customColors = null) {
 
 function renderGlobalGraph(agents = allLoadedAgents) {
     if (!document.getElementById("cy")) return;
-    
+
     const elements = [];
-    
+
     // Fixed Colors from Legend
     const COLORS = {
         agent: "#a855f7", // Purple
@@ -466,16 +645,41 @@ function renderGlobalGraph(agents = allLoadedAgents) {
         tool: "#eab308",  // Yellow
         resource: "#22c55e" // Green
     };
-    
-    agents.forEach((agent, idx) => {
+
+    // 1. Project parent (compound) nodes — one circle per project cluster
+    const projectCounts = {};
+    agents.forEach(a => {
+        const n = a.projectName || "Unassigned";
+        projectCounts[n] = (projectCounts[n] || 0) + 1;
+    });
+    const projectParentId = {};
+    Object.keys(projectCounts).forEach(name => {
+        const pid = `proj::${name}`;
+        projectParentId[name] = pid;
+        const count = projectCounts[name];
+        elements.push({
+            data: {
+                id: pid,
+                label: `${name}\n${count} agent${count === 1 ? "" : "s"}`,
+                type: "project",
+                color: ensureProjectColor(name)
+            },
+            selectable: false
+        });
+    });
+
+    agents.forEach((agent) => {
+        const parent = projectParentId[agent.projectName || "Unassigned"];
+
         // Agent Node
         elements.push({
-            data: { 
-                id: agent.id, 
-                label: agent.name, 
-                type: "agent", 
-                icon: ICONS.agent, 
-                color: COLORS.agent 
+            data: {
+                id: agent.id,
+                label: agent.name,
+                type: "agent",
+                icon: ICONS.agent,
+                color: COLORS.agent,
+                parent: parent
             }
         });
 
@@ -485,12 +689,13 @@ function renderGlobalGraph(agents = allLoadedAgents) {
             // Check if node exists to avoid duplicates (shared models)
             if (!elements.find(e => e.data.id === modelId)) {
                 elements.push({
-                    data: { 
-                        id: modelId, 
-                        label: agent.model, 
-                        type: "model", 
-                        icon: ICONS.model, 
-                        color: COLORS.model 
+                    data: {
+                        id: modelId,
+                        label: agent.model,
+                        type: "model",
+                        icon: ICONS.model,
+                        color: COLORS.model,
+                        parent: parent
                     }
                 });
             }
@@ -498,26 +703,28 @@ function renderGlobalGraph(agents = allLoadedAgents) {
                 data: { source: agent.id, target: modelId, color: COLORS.model }
             });
         }
-        
+
         // Tools & Connections
         agent.tools.forEach((tool, i) => {
             const toolName = tool.name || tool.type;
             const toolId = `${agent.id}_tool_${i}`;
-            
+            const tl = (tool.type || "").toLowerCase();
+
             let icon = ICONS.tool;
-            if (tool.type.toLowerCase().includes("search")) icon = ICONS.search;
-            else if (tool.type.toLowerCase().includes("code")) icon = ICONS.code;
-            else if (tool.type.toLowerCase().includes("retrieval")) icon = ICONS.database;
-            else if (tool.type.toLowerCase().includes("mcp")) icon = "https://img.icons8.com/fluency/96/api-settings.png";
+            if (tl.includes("search")) icon = ICONS.search;
+            else if (tl.includes("code")) icon = ICONS.code;
+            else if (tl.includes("retrieval")) icon = ICONS.database;
+            else if (tl.includes("mcp")) icon = "https://img.icons8.com/fluency/96/api-settings.png";
 
             // Tool Node
             elements.push({
-                data: { 
-                    id: toolId, 
-                    label: toolName, 
-                    type: "tool", 
-                    icon: icon, 
-                    color: COLORS.tool 
+                data: {
+                    id: toolId,
+                    label: toolName,
+                    type: "tool",
+                    icon: icon,
+                    color: COLORS.tool,
+                    parent: parent
                 }
             });
             elements.push({
@@ -529,10 +736,11 @@ function renderGlobalGraph(agents = allLoadedAgents) {
                 const connId = `${toolId}_conn`;
                 const connName = tool.connection;
                 let connIcon = ICONS.resource;
-                
-                if (connName.toLowerCase().includes("github")) connIcon = ICONS.github;
-                else if (connName.toLowerCase().includes("search")) connIcon = ICONS.search;
-                else if (connName.toLowerCase().includes("database") || connName.toLowerCase().includes("sql")) connIcon = ICONS.database;
+                const cn = connName.toLowerCase();
+
+                if (cn.includes("github")) connIcon = ICONS.github;
+                else if (cn.includes("search")) connIcon = ICONS.search;
+                else if (cn.includes("database") || cn.includes("sql")) connIcon = ICONS.database;
 
                 elements.push({
                     data: {
@@ -540,7 +748,8 @@ function renderGlobalGraph(agents = allLoadedAgents) {
                         label: connName,
                         type: "resource",
                         icon: connIcon,
-                        color: COLORS.resource
+                        color: COLORS.resource,
+                        parent: parent
                     }
                 });
                 elements.push({
@@ -553,8 +762,58 @@ function renderGlobalGraph(agents = allLoadedAgents) {
     initCytoscape(elements);
 }
 
+function graphLayout(nodeCount) {
+    const reduce = prefersReducedMotion();
+    // Disable entrance animation for large graphs or reduced-motion users
+    const animate = !reduce && nodeCount <= 350;
+
+    if (typeof window.cytoscapeFcose !== "undefined") {
+        return {
+            name: "fcose",
+            quality: "default",
+            animate: animate,
+            animationDuration: 700,
+            animationEasing: "ease-out",
+            randomize: true,
+            fit: true,
+            padding: 40,
+            packComponents: true,   // pack the per-project clusters tightly
+            nodeSeparation: 80,
+            idealEdgeLength: 55,
+            nodeRepulsion: 6500,
+            gravity: 0.3,
+            gravityRange: 3.8,
+            gravityCompound: 1.4,
+            gravityRangeCompound: 1.6,
+            nestingFactor: 0.1,
+            numIter: 2500,
+            tile: true
+        };
+    }
+
+    // Fallback if the fcose extension failed to load: cose still respects compounds
+    return {
+        name: "cose",
+        animate: animate,
+        randomize: true,
+        componentSpacing: 100,
+        nodeRepulsion: 400000,
+        nodeOverlap: 12,
+        idealEdgeLength: 70,
+        edgeElasticity: 100,
+        nestingFactor: 5,
+        gravity: 80,
+        numIter: 1000,
+        coolingFactor: 0.95,
+        minTemp: 1.0
+    };
+}
+
 function initCytoscape(elements) {
     if (cy) cy.destroy();
+
+    const reduce = prefersReducedMotion();
+    const nodeCount = elements.filter(e => !e.data.source).length;
 
     cy = cytoscape({
         container: document.getElementById("cy"),
@@ -587,6 +846,36 @@ function initCytoscape(elements) {
                 }
             },
             {
+                // Project cluster bubble (compound parent) — the "circle per project"
+                selector: 'node[type="project"]',
+                style: {
+                    "background-image": "none",
+                    "background-color": "data(color)",
+                    "background-opacity": 0.07,
+                    // Cytoscape renders compound parents as rectangles only; round the corners for a softer "bubble".
+                    "shape": "round-rectangle",
+                    "border-width": 2,
+                    "border-color": "data(color)",
+                    "border-opacity": 0.55,
+                    "padding": "34px",
+                    "label": "data(label)",
+                    "text-valign": "bottom",
+                    "text-halign": "center",
+                    "text-margin-y": 12,
+                    "text-wrap": "wrap",
+                    "font-size": "15px",
+                    "font-weight": "bold",
+                    "color": "#f3f4f6",
+                    "text-outline-color": "#0f1117",
+                    "text-outline-width": 3,
+                    "text-outline-opacity": 0.9
+                }
+            },
+            {
+                selector: 'node[type="project"]:active',
+                style: { "background-opacity": 0.14 }
+            },
+            {
                 selector: "node[icon*='github_logo.png']",
                 style: {
                     "background-color": "#ffffff",
@@ -617,26 +906,20 @@ function initCytoscape(elements) {
                 }
             }
         ],
-        layout: {
-            name: "cose",
-            animate: !prefersReducedMotion(),
-            randomize: true,
-            componentSpacing: 80,
-            nodeRepulsion: 400000,
-            nodeOverlap: 10,
-            idealEdgeLength: 80,
-            edgeElasticity: 100,
-            nestingFactor: 5,
-            gravity: 80,
-            numIter: 1000,
-            initialTemp: 200,
-            coolingFactor: 0.95,
-            minTemp: 1.0
-        },
+        layout: graphLayout(nodeCount),
         userZoomingEnabled: true,
         userPanningEnabled: true
     });
-    
-    cy.center();
+
+    // Tap a project bubble to zoom into it; tap empty canvas to reset the view
+    cy.on("tap", 'node[type="project"]', (evt) => {
+        cy.animate({ fit: { eles: evt.target, padding: 50 } }, { duration: reduce ? 0 : 350 });
+    });
+    cy.on("tap", (evt) => {
+        if (evt.target === cy) {
+            cy.animate({ fit: { eles: cy.elements(), padding: 40 } }, { duration: reduce ? 0 : 350 });
+        }
+    });
+
     window.cy = cy;
 }

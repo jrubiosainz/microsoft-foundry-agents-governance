@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Azure AI Foundry Agents Governance</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+    <!-- fcose compound layout (vendored locally, load order matters: cytoscape -> layout-base -> cose-base -> fcose) -->
+    <script src="/static/js/vendor/layout-base.js"></script>
+    <script src="/static/js/vendor/cose-base.js"></script>
+    <script src="/static/js/vendor/cytoscape-fcose.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="/static/css/tailwind.css">
     <link rel="stylesheet" href="/static/css/style.css">
@@ -179,10 +183,14 @@
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>
                             Filters:
                         </div>
-                        <div class="relative">
-                            <label for="filter-project" class="sr-only">Filter by project name</label>
-                            <input id="filter-project" placeholder="Project Name..." class="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 pl-8 text-xs text-white w-40 focus:outline-none focus:border-blue-500/50 transition-all placeholder-gray-400">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-gray-400 absolute left-2.5 top-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                        <div class="relative" id="project-multiselect">
+                            <button type="button" id="filter-project-btn" aria-haspopup="listbox" aria-expanded="false"
+                                class="ms-trigger" title="Filter by project">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h18M6 12h12M10 17h4" /></svg>
+                                <span id="filter-project-label" class="ms-trigger__label truncate">All Projects</span>
+                                <span id="filter-project-count" class="ms-trigger__count hidden">0</span>
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-gray-400 flex-shrink-0 ms-trigger__chevron" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                            </button>
                         </div>
                         <div class="relative">
                             <label for="filter-agent" class="sr-only">Filter by agent name</label>
@@ -333,7 +341,7 @@
     <!-- Overlay for Drawer -->
     <div id="drawer-overlay" onclick="closeDrawer()" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 hidden transition-opacity"></div>
 
-    <script src="/static/js/graph.js?v=4"></script>
+    <script src="/static/js/graph.js?v=5"></script>
     <script>
         // Sidebar (mobile off-canvas) toggle
         function toggleSidebar(open) {

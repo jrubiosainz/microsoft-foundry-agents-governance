@@ -13,6 +13,7 @@ const projectColorMap = {};        // projectName -> stable color (shared by dro
 // Multi-select controllers (created by initMultiselects)
 let msProject = null, msAgent = null, msModel = null;
 let debouncedApply = null;
+const msRegistry = []; // every createMultiSelect registers its closePanel() here so one can close the others
 
 // Distinct Colors for Agents
 const AGENT_COLORS = [
@@ -475,6 +476,9 @@ function createMultiSelect(opts) {
         panel.style.left = left + "px";
     }
     function openPanel() {
+        // Close any other open multi-select first (their button's stopPropagation
+        // otherwise prevents the outside-click handler from closing them).
+        msRegistry.forEach(close => close());
         open = true;
         btn.setAttribute("aria-expanded", "true");
         search.value = "";
@@ -484,10 +488,13 @@ function createMultiSelect(opts) {
         search.focus();
     }
     function closePanel() {
+        if (!open) return;
         open = false;
         btn.setAttribute("aria-expanded", "false");
         panel.classList.add("hidden");
     }
+    // Register so sibling dropdowns can close this one when they open.
+    msRegistry.push(closePanel);
 
     btn.addEventListener("click", (e) => { e.stopPropagation(); open ? closePanel() : openPanel(); });
     search.addEventListener("input", () => renderList(search.value));
@@ -872,9 +879,12 @@ function initCytoscape(elements) {
                     "background-color": "data(color)",
                     "background-opacity": 0.2,
                     "background-image": "data(icon)",
-                    "background-fit": "cover",
-                    "background-width": "60%",
-                    "background-height": "60%",
+                    "background-fit": "none",
+                    "background-width": "58%",
+                    "background-height": "58%",
+                    "background-position-x": "50%",
+                    "background-position-y": "50%",
+                    "background-clip": "none",
                     "border-width": 2,
                     "border-color": "data(color)",
                     "width": 50,

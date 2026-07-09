@@ -5,6 +5,7 @@ let resourceCache = {};
 let allLoadedAgents = []; // Store all loaded agents for global graph/KPIs
 let charts = {}; // Store Chart.js instances
 let activeLoadingRequests = 0; // Track active fetches
+let streamingLoad = false; // true while agents stream in during the initial load (disables layout animation)
 let selectedProjects = new Set(); // Project names selected in the multi-select filter
 let selectedAgents = new Set();   // Agent names selected in the multi-select filter
 let selectedModels = new Set();   // Model names selected in the multi-select filter
@@ -271,49 +272,97 @@ window.openAccessDrawer = async function(projectId, projectName) {
 
 // --- Data Loading Functions ---
 
+// Throttle the (expensive) graph/table render while agents stream in, so the
+// fcose layout doesn't re-run on every project. Renders at most once per
+// RENDER_THROTTLE_MS during load; a final authoritative render runs when done.
+const RENDER_THROTTLE_MS = 700;
+let lastIncrementalRender = 0;
+let incrementalRenderTimer = null;
+
+function renderIncremental() {
+    lastIncrementalRender = Date.now();
+    populateFilterOptions();
+    updateKPIs();
+    applyGlobalFilters();
+}
+
+function scheduleIncrementalRender() {
+    const elapsed = Date.now() - lastIncrementalRender;
+    if (elapsed >= RENDER_THROTTLE_MS) {
+        renderIncremental();
+    } else if (!incrementalRenderTimer) {
+        incrementalRenderTimer = setTimeout(() => {
+            incrementalRenderTimer = null;
+            renderIncremental();
+        }, RENDER_THROTTLE_MS - elapsed);
+    }
+}
+
+function updateLoadProgress(done, total) {
+    const text = document.getElementById("loading-text");
+    if (text && total > 0) {
+        text.textContent = `Loading agents… ${done} / ${total} projects`;
+    }
+}
+
 async function loadAllData() {
     updateLoadingState(true);
+    allLoadedAgents = [];
     try {
         const subsResponse = await fetch("/api/subscriptions");
         if (!subsResponse.ok) throw new Error("Failed to fetch subscriptions");
         const subs = await subsResponse.json();
 
-        const allAgentsPromises = subs.map(async (sub) => {
+        // Phase 1 — gather every project across subscriptions (fast metadata).
+        // Populating resourceCache up front lets the Projects KPI + empty graph
+        // shell appear immediately instead of waiting on agent discovery.
+        const allProjects = [];
+        await Promise.all(subs.map(async (sub) => {
             try {
                 const resResponse = await fetch(`/api/resources/${sub.subscriptionId}`);
-                if (!resResponse.ok) return [];
+                if (!resResponse.ok) return;
                 const data = await resResponse.json();
                 resourceCache[sub.subscriptionId] = data;
-
-                // Collect all projects (from hubs and orphans)
-                const projects = data.projects || [];
-                
-                // Fetch agents for all projects
-                return await fetchAgentsForProjects(projects);
+                (data.projects || []).forEach(p => allProjects.push(p));
             } catch (e) {
                 console.error(`Error loading resources for sub ${sub.subscriptionId}`, e);
-                return [];
             }
-        });
+        }));
 
-        const agentsArrays = await Promise.all(allAgentsPromises);
-        allLoadedAgents = agentsArrays.flat();
-
+        // Render the shell right away (project count visible, graph canvas ready).
         populateFilterOptions();
         updateKPIs();
-        applyGlobalFilters(); // This will render graph and table
+        applyGlobalFilters();
+
+        // Phase 2 — fetch agents per project and render incrementally as each one
+        // resolves, so a few dead/slow endpoints can't block the whole UI.
+        streamingLoad = true;
+        await fetchAgentsForProjects(allProjects, (done, total) => {
+            updateLoadProgress(done, total);
+            scheduleIncrementalRender();
+        });
+
+        // Final authoritative render (with animation) once everything settled.
+        if (incrementalRenderTimer) { clearTimeout(incrementalRenderTimer); incrementalRenderTimer = null; }
+        streamingLoad = false;
+        populateFilterOptions();
+        updateKPIs();
+        applyGlobalFilters();
 
     } catch (error) {
         console.error("Fatal error loading data", error);
     } finally {
+        streamingLoad = false;
         updateLoadingState(false);
     }
 }
 
-async function fetchAgentsForProjects(projects) {
-    const allAgents = [];
+async function fetchAgentsForProjects(projects, onProgress) {
     // Limit concurrency to avoid overwhelming the server/browser
     const CHUNK_SIZE = 5;
+    const total = projects.length;
+    let done = 0;
+    if (typeof onProgress === "function") onProgress(0, total);
     for (let i = 0; i < projects.length; i += CHUNK_SIZE) {
         const chunk = projects.slice(i, i + CHUNK_SIZE);
         await Promise.all(chunk.map(async (p) => {
@@ -326,15 +375,18 @@ async function fetchAgentsForProjects(projects) {
                         a.projectName = p.name;
                         a.projectEndpoint = p.endpoint;
                         // a.projectId is already set by backend if project_id was passed
-                        allAgents.push(a);
+                        allLoadedAgents.push(a);
                     });
                 }
             } catch (e) {
                 console.error(`Failed to fetch agents for ${p.name}`, e);
+            } finally {
+                done++;
+                if (typeof onProgress === "function") onProgress(done, total);
             }
         }));
     }
-    return allAgents;
+    return allLoadedAgents;
 }
 
 // --- Project multi-select dropdown ---------------------------------------
@@ -675,9 +727,7 @@ function renderChart(canvasId, type, label, dataMap, customColors = null) {
             scales: type === 'bar' ? {
                 y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
                 x: { grid: { display: false }, ticks: { color: '#9ca3af' } }
-            } : {
-                display: false // No scales for pie/doughnut
-            }
+            } : {} // pie/doughnut have no cartesian scales; an empty object avoids Chart.js' "Invalid scale configuration" warning
         }
     });
 }
@@ -818,8 +868,9 @@ function renderGlobalGraph(agents = allLoadedAgents) {
 
 function graphLayout(nodeCount) {
     const reduce = prefersReducedMotion();
-    // Disable entrance animation for large graphs or reduced-motion users
-    const animate = !reduce && nodeCount <= 350;
+    // Disable entrance animation for large graphs, reduced-motion users, or while
+    // agents are still streaming in (avoids the graph jumping on every update).
+    const animate = !reduce && !streamingLoad && nodeCount <= 350;
 
     if (typeof window.cytoscapeFcose !== "undefined") {
         return {

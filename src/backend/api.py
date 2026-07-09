@@ -17,8 +17,14 @@ static_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 app.mount("/static", StaticFiles(directory=static_path), name="static")
 
 # API Endpoints
+# NOTE: these handlers are declared as plain `def` (not `async def`) on purpose.
+# FoundryClient uses blocking `requests` calls (timeouts up to 30s). A blocking
+# call inside an `async def` handler runs ON the event loop and freezes the entire
+# server, including serving index.html and static assets. Declaring them `def` lets
+# FastAPI run each in its threadpool, so discovery calls run concurrently and the
+# UI/static files stay responsive.
 @app.get("/api/subscriptions")
-async def get_subscriptions():
+def get_subscriptions():
     try:
         client = FoundryClient() # No endpoint needed
         return client.get_subscriptions()
@@ -26,7 +32,7 @@ async def get_subscriptions():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/resources/{subscription_id}")
-async def get_resources(subscription_id: str):
+def get_resources(subscription_id: str):
     try:
         client = FoundryClient()
         return client.get_foundry_resources(subscription_id)
@@ -34,7 +40,7 @@ async def get_resources(subscription_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/agents")
-async def get_agents(project_endpoint: str, project_id: str = None):
+def get_agents(project_endpoint: str, project_id: str = None):
     if not project_endpoint:
         raise HTTPException(status_code=400, detail="Project Endpoint is required")
     
@@ -47,7 +53,7 @@ async def get_agents(project_endpoint: str, project_id: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/access/{resource_id:path}")
-async def get_access(resource_id: str):
+def get_access(resource_id: str):
     try:
         # We need a client, but endpoint doesn't matter for this call
         client = FoundryClient(project_endpoint="dummy")
@@ -67,7 +73,7 @@ async def get_access(resource_id: str):
 
 # Serve Frontend
 @app.get("/")
-async def read_index():
+def read_index():
     index_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "index.html")
     return FileResponse(index_path)
 

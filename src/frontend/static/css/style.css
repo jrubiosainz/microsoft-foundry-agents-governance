@@ -145,6 +145,10 @@ body {
     transform-origin: top;
     animation: msPanelIn 0.14s ease-out;
 }
+/* .ms-panel sets display:flex, which has the same specificity as Tailwind's
+   .hidden (display:none) but loads later, so it would win and leave the panel
+   permanently visible at 0,0. This explicit combined selector keeps hidden panels hidden. */
+.ms-panel.hidden { display: none; }
 @keyframes msPanelIn {
     from { opacity: 0; transform: translateY(-4px) scale(0.98); }
     to { opacity: 1; transform: translateY(0) scale(1); }
